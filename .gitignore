@@ -9,3 +9,6 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# Scratch output from the smoke scripts
+.scratch/

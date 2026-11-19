@@ -1,5 +1,7 @@
 import os
 
+from functions.paths import resolve_path
+
 schema_get_files_info = {
     "type": "function",
     "function": {
@@ -13,6 +15,8 @@ schema_get_files_info = {
                     "description": "Directory path to list files from, relative to the working directory (default is the working directory itself)",
                 },
             },
+            "required": ["directory"],
+            "additionalProperties": False,
         },
     },
 }
@@ -31,53 +35,59 @@ schema_get_file_content = {
                 },
             },
             "required": ["file_path"],
+            "additionalProperties": False,
         },
     },
 }
 
+MAX_CHARS = 10_000
+
+
 def get_files_info(working_directory: str, directory: str = ".") -> str:
-    
-    working_dir_abs = os.path.abspath(working_directory)
-    target_dir = os.path.normpath(os.path.join(working_dir_abs, directory))
-    valid_target_dir = os.path.commonpath([working_dir_abs, target_dir]) == working_dir_abs
-    if not os.path.isdir(target_dir):
+    target_dir, error = resolve_path(working_directory, directory, action="list")
+    if error:
+        return error
+
+    if not target_dir.is_dir():
         return f'Error: "{directory}" is not a directory'
-    
-    if not valid_target_dir:
-        return f'Error: Cannot list "{directory}" as it is outside the permitted working directory'
 
     files_info = []
-    for item in os.listdir(target_dir):
-        item_path = os.path.join(target_dir, item)
-        file_size = os.path.getsize(item_path)
-        is_dir = os.path.isdir(item_path)
-            
-            
-        files_info.append(f"- {item}: file_size={file_size} bytes, is_dir={is_dir}")
-    
+    try:
+        entries = sorted(os.scandir(target_dir), key=lambda entry: entry.name)
+    except OSError as exc:
+        return f'Error: Could not list "{directory}": {exc}'
+
+    for entry in entries:
+        try:
+            file_size = entry.stat().st_size
+            is_dir = entry.is_dir()
+        except OSError as exc:
+            files_info.append(f"- {entry.name}: could not stat ({exc})")
+            continue
+
+        files_info.append(
+            f"- {entry.name}: file_size={file_size} bytes, is_dir={is_dir}"
+        )
+
     return "\n".join(files_info)
-    return f'Success: "{directory}" is within the working directory'
-    
+
+
 def get_file_content(working_directory: str, file_path: str) -> str:
-        
-    working_dir_abs_content = os.path.abspath(working_directory)
-    target_file_path = os.path.normpath(os.path.join(working_dir_abs_content, file_path))
-    valid_target_file_path = os.path.commonpath([working_dir_abs_content, target_file_path]) == working_dir_abs_content
+    target_file, error = resolve_path(working_directory, file_path, action="read")
+    if error:
+        return error
 
-    if not  valid_target_file_path:
-         return f'Error: Cannot read "{file_path}" as it is outside the permitted working directory'
-    
-    if not os.path.isfile(target_file_path): 
-         return f'Error: File not found or is not a regular file: "{file_path}"'
-     
-    MAX_CHARS = 10000
-    
-    with open(target_file_path, "r", encoding="utf-8") as f:
-        content = f.read(MAX_CHARS)
-    
-        if f.read(1):
-            content += f'\n[...File "{target_file_path}" truncated at {MAX_CHARS} characters]'    
-    
+    if not target_file.is_file():
+        return f'Error: File not found or is not a regular file: "{file_path}"'
+
+    try:
+        with open(target_file, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read(MAX_CHARS)
+            if f.read(1):
+                content += (
+                    f'\n[...File "{file_path}" truncated at {MAX_CHARS} characters]'
+                )
+    except OSError as exc:
+        return f'Error: Could not read "{file_path}": {exc}'
+
     return content
-
-    

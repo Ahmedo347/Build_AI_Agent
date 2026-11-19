@@ -1,4 +1,4 @@
-import os
+from functions.paths import resolve_path
 
 schema_write_file = {
     "type": "function",
@@ -18,27 +18,25 @@ schema_write_file = {
                 },
             },
             "required": ["file_path", "content"],
+            "additionalProperties": False,
         },
     },
 }
 
+
 def write_file(working_directory: str, file_path: str, content: str) -> str:
+    target_file, error = resolve_path(working_directory, file_path, action="write to")
+    if error:
+        return error
 
-    working_dir_abs_content = os.path.abspath(working_directory)
-    target_file_path = os.path.normpath(os.path.join(working_dir_abs_content, file_path))
-    valid_target_file_path = os.path.commonpath([working_dir_abs_content, target_file_path]) == working_dir_abs_content
+    if target_file.is_dir():
+        return f'Error: Cannot write to "{file_path}" as it is a directory'
 
-    if not  valid_target_file_path:
-        return f'Error: Cannot write to "{file_path}" as it is outside the permitted working directory'
-
-    if os.path.isdir(target_file_path):
-            return f'Error: Cannot write to "{file_path}" as it is a directory'
-
-    parent_dir = os.path.dirname(target_file_path)
-    if parent_dir:
-        os.makedirs(parent_dir, exist_ok=True)
-
-    with open(target_file_path, "w") as f:
-         f.write(content)
+    try:
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(target_file, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+    except OSError as exc:
+        return f'Error: Could not write to "{file_path}": {exc}'
 
     return f'Successfully wrote to "{file_path}" ({len(content)} characters written)'
