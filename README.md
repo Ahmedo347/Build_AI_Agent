@@ -41,7 +41,7 @@ Any OpenAI-compatible endpoint works; only three variables matter.
 | --- | --- | --- |
 | `LLM_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/` | Google AI Studio compat layer |
 | `LLM_API_KEY` | — | Required. Fallbacks: `FREELLMAPI_API_KEY`, then a provider-specific key (`OPENROUTER_API_KEY`, `GOOGLE_API_KEY`) only when the base URL matches that provider |
-| `LLM_MODEL` | `gemini-2.5-flash-lite` | Pin an exact version; avoid `-latest` aliases when comparing runs |
+| `LLM_MODEL` | `gemini-3.5-flash-lite` | Pin an exact version; avoid `-latest` aliases when comparing runs |
 | `LLM_MIN_INTERVAL` | `4.0` | Seconds between requests (≈15 RPM). Raise it if you hit 429s |
 | `LLM_TIMEOUT` | `120` | Per-request timeout in seconds |
 | `LLM_MAX_TOKENS` | `8192` | Output cap |
@@ -71,7 +71,7 @@ LLM_MODEL=qwen2.5:7b
 uv run main.py "run the tests in calculator and fix anything that fails"
 uv run main.py "add a modulo operator to pkg/calculator.py" --verbose
 uv run main.py "explain what pkg/render.py does" --working-directory calculator
-uv run main.py "list the files here" --model gemini-2.5-flash --min-interval 6
+uv run main.py "list the files here" --model gemini-3.5-flash --min-interval 6
 ```
 
 | Flag | Description |
@@ -85,7 +85,7 @@ uv run main.py "list the files here" --model gemini-2.5-flash --min-interval 6
 A run ends with a one-line summary:
 
 ```
-[model=gemini-2.5-flash-lite | served=gemini-2.5-flash-lite | turns=4
+[model=gemini-3.5-flash-lite | served=gemini-3.5-flash-lite | turns=4
  | prompt_tokens=3120 | completion_tokens=214 | rate_limit_wait=12.0s]
 ```
 

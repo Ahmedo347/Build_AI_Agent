@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-DEFAULT_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_WORKING_DIRECTORY = "calculator"
 
 # Keep under the free tier's requests-per-minute cap. Gemini 2.5 Flash Lite
