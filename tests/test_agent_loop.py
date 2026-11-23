@@ -20,6 +20,7 @@ from fakes import (
 
 import main
 from functions.call_function import available_functions
+from permissions import ALLOW_ALL, DRY_RUN, InteractivePolicy
 from ratelimit import RateLimiter
 
 
@@ -236,3 +237,181 @@ def test_summary_reports_served_model_and_tokens(repo):
     assert "served=served-model" in summary
     assert "turns=1" in summary
     assert "prompt_tokens=10" in summary
+
+
+# --- permission gate -------------------------------------------------------
+
+
+def write_call(path: str = "out.txt", content: str = "hi", id: str = "call_1"):
+    return tool_call("write_file", {"file_path": path, "content": content}, id=id)
+
+
+def test_mutating_tool_without_policy_is_denied(repo):
+    client = FakeClient(
+        [
+            completion(message(tool_calls=[write_call()]), finish_reason="tool_calls"),
+            completion(message("understood")),
+        ]
+    )
+
+    result = main.run_agent(client, "write a file", repo, model="m")
+
+    assert result.denied_calls == 1
+    assert result.tool_calls == 0
+    assert not (repo / "out.txt").exists()
+    assert result.final_message == "understood"
+
+    tool_message = client.calls[1]["messages"][-1]
+    assert tool_message["role"] == "tool"
+    assert tool_message["tool_call_id"] == "call_1"
+    assert "No changes were made" in tool_message["content"]
+
+
+def test_allow_all_policy_executes_the_write(repo):
+    client = FakeClient(
+        [
+            completion(message(tool_calls=[write_call()]), finish_reason="tool_calls"),
+            completion(message("written")),
+        ]
+    )
+
+    result = main.run_agent(client, "write a file", repo, model="m", policy=ALLOW_ALL)
+
+    assert result.tool_calls == 1
+    assert result.denied_calls == 0
+    assert (repo / "out.txt").read_text(encoding="utf-8") == "hi"
+
+
+def test_dry_run_refuses_the_write_and_says_so(repo):
+    client = FakeClient(
+        [
+            completion(message(tool_calls=[write_call()]), finish_reason="tool_calls"),
+            completion(message("skipped")),
+        ]
+    )
+
+    result = main.run_agent(client, "write a file", repo, model="m", policy=DRY_RUN)
+
+    assert result.denied_calls == 1
+    assert not (repo / "out.txt").exists()
+
+    content = client.calls[1]["messages"][-1]["content"]
+    assert "dry-run" in content
+    assert "No changes were made" in content
+
+
+def test_dry_run_refuses_execution(repo):
+    (repo / "touch.py").write_text(
+        "from pathlib import Path\nPath('created.txt').write_text('x')\n",
+        encoding="utf-8",
+    )
+    client = FakeClient(
+        [
+            completion(
+                message(
+                    tool_calls=[tool_call("run_python_file", {"file_path": "touch.py"})]
+                ),
+                finish_reason="tool_calls",
+            ),
+            completion(message("skipped")),
+        ]
+    )
+
+    result = main.run_agent(client, "run it", repo, model="m", policy=DRY_RUN)
+
+    assert result.denied_calls == 1
+    assert not (repo / "created.txt").exists()
+    assert "dry-run" in client.calls[1]["messages"][-1]["content"]
+
+
+def test_interactive_decline_is_a_denial_not_a_crash(repo):
+    client = FakeClient(
+        [
+            completion(message(tool_calls=[write_call()]), finish_reason="tool_calls"),
+            completion(message("ok, I will not")),
+        ]
+    )
+    policy = InteractivePolicy(input_fn=lambda prompt: "n")
+
+    result = main.run_agent(client, "write a file", repo, model="m", policy=policy)
+
+    assert result.ok
+    assert result.denied_calls == 1
+    assert not (repo / "out.txt").exists()
+    assert "the user declined" in client.calls[1]["messages"][-1]["content"]
+
+
+def test_interactive_approval_executes(repo):
+    client = FakeClient(
+        [
+            completion(message(tool_calls=[write_call()]), finish_reason="tool_calls"),
+            completion(message("done")),
+        ]
+    )
+    policy = InteractivePolicy(input_fn=lambda prompt: "y")
+
+    result = main.run_agent(client, "write a file", repo, model="m", policy=policy)
+
+    assert result.tool_calls == 1
+    assert (repo / "out.txt").read_text(encoding="utf-8") == "hi"
+
+
+def test_read_only_tools_ignore_a_raising_policy(repo):
+    def explode(request):
+        raise AssertionError("a read-only tool must not ask for permission")
+
+    client = FakeClient(
+        [
+            completion(
+                message(tool_calls=[tool_call("get_files_info", {"directory": "."})]),
+                finish_reason="tool_calls",
+            ),
+            completion(message("three entries")),
+        ]
+    )
+
+    result = main.run_agent(client, "list", repo, model="m", policy=explode)
+
+    assert result.tool_calls == 1
+    assert result.denied_calls == 0
+    assert "- notes.txt:" in client.calls[1]["messages"][-1]["content"]
+
+
+def test_mixed_turn_answers_every_call_in_order(repo):
+    client = FakeClient(
+        [
+            completion(
+                message(
+                    tool_calls=[
+                        tool_call("get_files_info", {"directory": "."}, id="read"),
+                        write_call(id="write"),
+                    ]
+                ),
+                finish_reason="tool_calls",
+            ),
+            completion(message("done")),
+        ]
+    )
+
+    result = main.run_agent(client, "look and write", repo, model="m")
+
+    assert result.tool_calls == 1
+    assert result.denied_calls == 1
+
+    answers = [
+        item
+        for item in client.calls[1]["messages"]
+        if isinstance(item, dict) and item.get("role") == "tool"
+    ]
+    assert [item["tool_call_id"] for item in answers] == ["read", "write"]
+    assert "- notes.txt:" in answers[0]["content"]
+    assert "No changes were made" in answers[1]["content"]
+
+
+def test_summary_mentions_denials_only_when_they_happen(repo):
+    clean = main.RunResult()
+    denied = main.RunResult(denied_calls=2)
+    settings = SimpleNamespace(model="m")
+
+    assert "denied=" not in main.format_summary(settings, clean)
+    assert "denied=2" in main.format_summary(settings, denied)

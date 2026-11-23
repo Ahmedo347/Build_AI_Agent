@@ -1,8 +1,10 @@
 import argparse
+import json
 import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from openai import (
@@ -14,6 +16,14 @@ from openai import (
 )
 
 from functions.call_function import available_functions, call_function
+from permissions import (
+    PermissionRequest,
+    Policy,
+    authorize,
+    build_policy,
+    refusal_message,
+    stdin_is_tty,
+)
 from prompts import system_prompt
 from ratelimit import RateLimiter
 from settings import Settings
@@ -32,6 +42,7 @@ class RunResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     tool_calls: int = 0
+    denied_calls: int = 0
     models_seen: list[str] = field(default_factory=list)
     rate_limit_wait: float = 0.0
     final_message: str | None = None
@@ -68,6 +79,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=None,
         help="Minimum seconds between model requests (default: $LLM_MIN_INTERVAL or 4.0)",
+    )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Approve every write and execution without asking (for evals)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Refuse writes and code execution; read-only tools still work",
     )
     return parser.parse_args(argv)
 
@@ -141,6 +163,19 @@ def _normalise_tool_call_ids(message, turn: int) -> None:
                 pass
 
 
+def _tool_arguments(tool_call) -> dict[str, Any]:
+    """Parse arguments for display only; ``call_function`` still re-parses them.
+
+    A malformed payload becomes ``{}`` here so the approval prompt can be shown
+    instead of crashing. The tool itself will then report the parse error.
+    """
+    try:
+        parsed = json.loads(tool_call.function.arguments or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def run_agent(
     client: OpenAI,
     prompt: str,
@@ -150,11 +185,18 @@ def run_agent(
     max_iterations: int = 20,
     max_tokens: int = 8192,
     limiter: RateLimiter | None = None,
+    policy: Policy | None = None,
     verbose: bool = False,
 ) -> RunResult:
-    """Run the tool-calling loop. Never raises for expected API failures."""
+    """Run the tool-calling loop. Never raises for expected API failures.
+
+    ``policy`` gates ``write_file`` and ``run_python_file``. ``None`` means
+    deny: the loop never calls ``input()`` itself, so a caller that forgets a
+    policy gets refusals rather than silent executions.
+    """
     limiter = limiter if limiter is not None else RateLimiter(0)
     result = RunResult()
+    working_directory = Path(working_directory)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -212,6 +254,21 @@ def run_agent(
                 return result
 
             for tool_call in message.tool_calls:
+                request = PermissionRequest(
+                    tool_name=tool_call.function.name,
+                    arguments=_tool_arguments(tool_call),
+                    working_directory=working_directory,
+                )
+                decision = authorize(request, policy)
+
+                if not decision.allowed:
+                    result.denied_calls += 1
+                    result_message = refusal_message(tool_call.id, decision)
+                    print(f" - Denied: {request.describe()}")
+                    print(f"   {decision.message}")
+                    messages.append(result_message)
+                    continue
+
                 result_message = call_function(
                     tool_call,
                     working_directory=str(working_directory),
@@ -250,10 +307,12 @@ def run_agent(
 
 def format_summary(settings: Settings, result: RunResult) -> str:
     served = ", ".join(result.models_seen) if result.models_seen else settings.model
+    denied = f" | denied={result.denied_calls}" if result.denied_calls else ""
     return (
         f"[model={settings.model} | served={served} | turns={result.turns} "
         f"| prompt_tokens={result.prompt_tokens} "
-        f"| completion_tokens={result.completion_tokens} "
+        f"| completion_tokens={result.completion_tokens}"
+        f"{denied} "
         f"| rate_limit_wait={result.rate_limit_wait:.1f}s]"
     )
 
@@ -268,11 +327,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f'Error: "{settings.working_directory}" is not a directory')
         return 1
 
+    policy = build_policy(
+        auto_approve=args.yes,
+        dry_run=args.dry_run,
+        is_tty=stdin_is_tty(),
+    )
+
     if settings.verbose:
         print(f"Base URL: {settings.base_url}")
         print(f"Model: {settings.model} (key from {settings.api_key_source})")
         print(f"Working directory: {settings.working_directory}")
         print(f"Rate limit: {settings.min_interval:.1f}s between requests")
+        print(f"Permissions: {policy.name}")
         print(f"User prompt: {args.user_prompt}")
 
     result = run_agent(
@@ -283,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         max_iterations=settings.max_iterations,
         max_tokens=settings.max_tokens,
         limiter=RateLimiter(settings.min_interval),
+        policy=policy,
         verbose=settings.verbose,
     )
 

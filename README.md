@@ -81,6 +81,8 @@ uv run main.py "list the files here" --model gemini-3.5-flash --min-interval 6
 | `--base-url` | Override `LLM_BASE_URL` |
 | `--model` | Override `LLM_MODEL` |
 | `--min-interval` | Override `LLM_MIN_INTERVAL` |
+| `--yes`, `-y` | Approve every write and execution without asking (for evals) |
+| `--dry-run` | Refuse writes and execution; read-only tools still work |
 
 A run ends with a one-line summary:
 
@@ -92,11 +94,53 @@ A run ends with a one-line summary:
 `served` is the model the provider actually answered with — worth logging when a
 gateway (FreeLLMAPI, OpenRouter `auto`) may route elsewhere.
 
+## Permissions
+
+Every tool is classified in code, not by the model:
+
+| Tool | Gate |
+| --- | --- |
+| `get_files_info`, `get_file_content` | auto-allow, never prompt |
+| `write_file`, `run_python_file` | ask `[y/N]`, showing the tool, path and size/args |
+
+```
+Allow write_file (path: pkg/calculator.py, 220 chars)? [y/N]
+Allow run_python_file (path: main.py, args: ['3 + 5'])? [y/N]
+```
+
+Anything other than an explicit `y`/`yes` is a no, including end of input.
+
+| Flag | Behaviour |
+| --- | --- |
+| `--yes` / `-y` | approve everything (evals, unattended runs) |
+| `--dry-run` | refuse every write and execution and tell the model it is read-only |
+| *(neither)* | ask, but only if stdin is a terminal |
+
+**Fail-closed:** when stdin is not a TTY (a pipe, cron, CI) and neither flag is
+given, mutating calls are refused automatically. `--dry-run` outranks `--yes`,
+because someone asking for a dry run should not get writes from a stray `-y`.
+
+A refusal is never an exception. It becomes an ordinary `tool` message with the
+same `tool_call_id`, so the conversation stays valid and the model reads
+"Permission denied ... No changes were made" and can try another approach. The
+summary counts them:
+
+```
+[model=gemini-3.5-flash-lite | served=gemini-3.5-flash-lite | turns=4
+ | prompt_tokens=3120 | completion_tokens=214 | denied=1 | rate_limit_wait=12.0s]
+```
+
+`run_agent()` takes the policy as a `policy=` argument and never reads stdin
+itself, so the loop stays headless-testable and the CLI owns all terminal I/O. A
+policy is any callable that takes a `PermissionRequest` and returns
+`Decision.allow()` or `Decision.deny(reason)`; there are four built in:
+`ALLOW_ALL`, `DRY_RUN`, `NON_INTERACTIVE`, and `InteractivePolicy`.
+
 ## Testing
 
 ```bash
 uv sync --dev
-uv run pytest        # 108 tests, ~2s
+uv run pytest        # 158 tests, ~2s
 uv run ruff check .
 uv run ruff format --check .
 ```
@@ -110,6 +154,7 @@ key explicitly blank.
 | File | Covers |
 | --- | --- |
 | `tests/test_paths.py` | Traversal, absolute paths, **symlink escapes**, the secret deny-list |
+| `tests/test_permissions.py` | Classification, policy precedence, interactive answers, fail-closed defaults |
 | `tests/test_tools.py` | All four tools: truncation, timeouts, exit codes, env scrubbing |
 | `tests/test_call_function.py` | Bad JSON, unknown tools, tool exceptions — none may raise |
 | `tests/test_agent_loop.py` | Tool round-trips, missing `tool_call_id`, `content_filter`, iteration cap, accounting |
@@ -137,6 +182,9 @@ CI (`.github/workflows/ci.yml`) runs lint, format check and the tests on Python
   place instead of multiplying.
 - **Output is bounded on both ends.** Reads stop at 10k characters, subprocess
   output at 20k, so one noisy file cannot blow the context window.
+- **The approval gate is deterministic.** Tool names are classified in
+  `permissions.py`, so the model cannot argue its way past it, and a missing or
+  crashing policy denies rather than allows.
 - **Safety-filtered responses are detected** (`finish_reason == "content_filter"`)
   and reported, rather than surfacing an empty message.
 
@@ -146,6 +194,7 @@ CI (`.github/workflows/ci.yml`) runs lint, format check and the tests on Python
 main.py                     CLI, agent loop (run_agent), retries, accounting
 settings.py                 Config resolution: CLI > env > defaults
 ratelimit.py                Minimum-interval limiter between requests
+permissions.py              Deterministic gate: read vs mutate, policies, refusals
 prompts.py                  System prompt
 functions/paths.py          Shared containment + secret deny-list
 functions/call_function.py  Tool dispatch: schema -> implementation, never raises
@@ -159,7 +208,8 @@ test_*.py                   Original print-based smoke scripts (not pytest)
 ## Known limits
 
 - Single working directory per run; no multi-repo support.
-- No approval prompt before writes or execution — run it on fixture code.
+- Approval is per tool call, not per diff: an approved `write_file` overwrites
+  the file, and there is no undo.
 - No conversation persistence or `--resume`.
 - Execution is not containerized.
 - Tool schemas stay deliberately plain (no `additionalProperties`, defaults or
