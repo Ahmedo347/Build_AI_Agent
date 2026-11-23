@@ -46,19 +46,12 @@
     {
       "id": "fix-02",
       "category": "fix",
-      "prompt": "The calculator doesn't handle negative numbers correctly. For example, '3 + -5' fails. Fix pkg/calculator.py to support negative numbers in expressions.",
-      "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
-    },
-    {
-      "id": "fix-03",
-      "category": "fix",
       "prompt": "The calculator doesn't support parentheses for grouping. Add support for parentheses so that expressions like '(3 + 5) * 2' evaluate correctly.",
       "expected_substrings": null,
       "verify_cmd": "python -m pytest tests.py -v"
     },
     {
-      "id": "fix-04",
+      "id": "fix-03",
       "category": "fix",
       "prompt": "The calculator's evaluate() method returns None for empty strings, but the main.py CLI treats None as an error. Make evaluate() raise ValueError('empty expression') instead of returning None for empty/whitespace input, and update main.py to catch this.",
       "expected_substrings": null,
@@ -105,13 +98,6 @@
       "prompt": "How does the format_json_output function in pkg/render.py work? What does it do with integer results like 5.0?",
       "expected_substrings": ["format_json_output", "integer", "is_integer", "int", "json.dumps"],
       "verify_cmd": null
-    },
-    {
-      "id": "fix-05",
-      "category": "fix",
-      "prompt": "The calculator fails on expressions with extra whitespace like '3  +  5'. Fix the tokenization in evaluate() to handle multiple spaces between tokens.",
-      "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
     },
     {
       "id": "feature-06",
