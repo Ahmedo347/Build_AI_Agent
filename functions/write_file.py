@@ -18,7 +18,6 @@ schema_write_file = {
                 },
             },
             "required": ["file_path", "content"],
-            "additionalProperties": False,
         },
     },
 }

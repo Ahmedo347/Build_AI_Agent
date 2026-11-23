@@ -16,7 +16,6 @@ schema_get_files_info = {
                 },
             },
             "required": ["directory"],
-            "additionalProperties": False,
         },
     },
 }
@@ -35,7 +34,6 @@ schema_get_file_content = {
                 },
             },
             "required": ["file_path"],
-            "additionalProperties": False,
         },
     },
 }

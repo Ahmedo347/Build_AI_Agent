@@ -24,7 +24,6 @@ schema_run_python_file = {
                 },
             },
             "required": ["file_path"],
-            "additionalProperties": False,
         },
     },
 }
