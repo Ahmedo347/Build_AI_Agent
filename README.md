@@ -92,6 +92,34 @@ A run ends with a one-line summary:
 `served` is the model the provider actually answered with — worth logging when a
 gateway (FreeLLMAPI, OpenRouter `auto`) may route elsewhere.
 
+## Testing
+
+```bash
+uv sync --dev
+uv run pytest        # 108 tests, ~2s
+uv run ruff check .
+uv run ruff format --check .
+```
+
+The suite is **fully offline**: the model is replaced by a scripted fake that
+returns real `openai` response objects, so attribute drift between our loop and
+the SDK fails in CI instead of in a live run. Nothing here reads `.env` or makes
+a network call, which is why CI also runs the suite a second time with the API
+key explicitly blank.
+
+| File | Covers |
+| --- | --- |
+| `tests/test_paths.py` | Traversal, absolute paths, **symlink escapes**, the secret deny-list |
+| `tests/test_tools.py` | All four tools: truncation, timeouts, exit codes, env scrubbing |
+| `tests/test_call_function.py` | Bad JSON, unknown tools, tool exceptions — none may raise |
+| `tests/test_agent_loop.py` | Tool round-trips, missing `tool_call_id`, `content_filter`, iteration cap, accounting |
+| `tests/test_retry.py` | 429/5xx retries, `Retry-After`, non-retryable 4xx, limiter placement |
+| `tests/test_settings.py` | CLI > env > default precedence, provider-specific keys |
+| `tests/test_ratelimit.py` | Interval spacing with an injected clock |
+
+CI (`.github/workflows/ci.yml`) runs lint, format check and the tests on Python
+3.13 for every push to `main` and every pull request.
+
 ## Design notes
 
 - **Tool errors are values, not exceptions.** A failed tool returns `Error: ...`
@@ -115,15 +143,17 @@ gateway (FreeLLMAPI, OpenRouter `auto`) may route elsewhere.
 ## Layout
 
 ```
-main.py                     CLI, agent loop, retries, token accounting
+main.py                     CLI, agent loop (run_agent), retries, accounting
 settings.py                 Config resolution: CLI > env > defaults
 ratelimit.py                Minimum-interval limiter between requests
 prompts.py                  System prompt
 functions/paths.py          Shared containment + secret deny-list
 functions/call_function.py  Tool dispatch: schema -> implementation, never raises
 functions/*.py              One tool per module, schema next to implementation
+tests/                      Offline pytest suite with a scripted fake client
 calculator/                 Tutorial fixture: a small calculator app to operate on
-test_*.py                   Smoke scripts for each tool
+test_*.py                   Original print-based smoke scripts (not pytest)
+.github/workflows/ci.yml    Lint + format + tests on Python 3.13
 ```
 
 ## Known limits

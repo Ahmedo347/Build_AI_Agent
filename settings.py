@@ -49,10 +49,14 @@ class Settings:
     verbose: bool
 
     @classmethod
-    def from_env(cls, args: Namespace, *, environ: dict[str, str] | None = None) -> Settings:
+    def from_env(
+        cls, args: Namespace, *, environ: dict[str, str] | None = None
+    ) -> Settings:
         env = os.environ if environ is None else environ
 
-        base_url = (args.base_url or _first(env, "LLM_BASE_URL") or DEFAULT_BASE_URL).strip()
+        base_url = (
+            args.base_url or _first(env, "LLM_BASE_URL") or DEFAULT_BASE_URL
+        ).strip()
         if not base_url.endswith("/"):
             base_url += "/"
 
@@ -62,7 +66,10 @@ class Settings:
             base_url=base_url,
             api_key=api_key,
             api_key_source=api_key_source,
-            model=args.model or _first(env, "LLM_MODEL") or _legacy_model(env, base_url) or DEFAULT_MODEL,
+            model=args.model
+            or _first(env, "LLM_MODEL")
+            or _legacy_model(env, base_url)
+            or DEFAULT_MODEL,
             working_directory=Path(args.working_directory),
             min_interval=_as_float(
                 args.min_interval,

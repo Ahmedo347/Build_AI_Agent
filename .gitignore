@@ -10,5 +10,9 @@ wheels/
 .venv
 .env
 
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
 # Scratch output from the smoke scripts
 .scratch/

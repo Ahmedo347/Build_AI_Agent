@@ -8,3 +8,17 @@ dependencies = [
     "openai==2.44.0",
     "python-dotenv==1.1.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.pytest.ini_options]
+# The root test_*.py files are print-based smoke scripts, not pytest modules.
+testpaths = ["tests"]
+addopts = "--strict-markers"
+
+[tool.ruff]
+extend-exclude = ["calculator"]

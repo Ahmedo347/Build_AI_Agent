@@ -1,7 +1,8 @@
 import argparse
 import random
-import sys
 import time
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import (
@@ -22,7 +23,26 @@ BACKOFF_BASE_SECONDS = 4.0
 MAX_BACKOFF_SECONDS = 60.0
 
 
-def parse_args() -> argparse.Namespace:
+@dataclass
+class RunResult:
+    """Everything a caller (CLI, eval harness, test) needs to know about a run."""
+
+    exit_code: int = 0
+    turns: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    tool_calls: int = 0
+    models_seen: list[str] = field(default_factory=list)
+    rate_limit_wait: float = 0.0
+    final_message: str | None = None
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.exit_code == 0
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="A tool-calling AI coding agent confined to a working directory"
     )
@@ -41,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default=None,
-        help="Model id (default: $LLM_MODEL or gemini-2.5-flash-lite)",
+        help="Model id (default: $LLM_MODEL or gemini-3.5-flash-lite)",
     )
     parser.add_argument(
         "--min-interval",
@@ -49,7 +69,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Minimum seconds between model requests (default: $LLM_MIN_INTERVAL or 4.0)",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def create_client(settings: Settings) -> OpenAI:
@@ -77,9 +97,7 @@ def _retry_after_seconds(exc: Exception) -> float | None:
         return None
 
 
-def request_completion(
-    client: OpenAI, limiter: RateLimiter, **kwargs
-):
+def request_completion(client: OpenAI, limiter: RateLimiter, **kwargs):
     """Call the API, waiting for the rate limit and retrying transient failures."""
     for attempt in range(1, MAX_RETRIES + 1):
         limiter.wait()
@@ -89,8 +107,10 @@ def request_completion(
             if attempt == MAX_RETRIES:
                 raise
             hinted = _retry_after_seconds(exc)
-            delay = hinted if hinted else min(
-                BACKOFF_BASE_SECONDS * 2 ** (attempt - 1), MAX_BACKOFF_SECONDS
+            delay = (
+                hinted
+                if hinted
+                else min(BACKOFF_BASE_SECONDS * 2 ** (attempt - 1), MAX_BACKOFF_SECONDS)
             )
             delay += random.uniform(0, 0.5)
             print(
@@ -111,18 +131,135 @@ def request_completion(
     raise RuntimeError("unreachable")
 
 
-def _normalise_tool_call_ids(message) -> None:
+def _normalise_tool_call_ids(message, turn: int) -> None:
     """Fill in missing tool-call ids so the next turn's tool messages match."""
     for index, tool_call in enumerate(message.tool_calls or []):
         if not tool_call.id:
             try:
-                tool_call.id = f"call_{index}_{int(time.time() * 1000) % 100000}"
+                tool_call.id = f"call_{turn}_{index}"
             except (AttributeError, ValueError):
                 pass
 
 
-def main() -> int:
-    args = parse_args()
+def run_agent(
+    client: OpenAI,
+    prompt: str,
+    working_directory: Path,
+    *,
+    model: str,
+    max_iterations: int = 20,
+    max_tokens: int = 8192,
+    limiter: RateLimiter | None = None,
+    verbose: bool = False,
+) -> RunResult:
+    """Run the tool-calling loop. Never raises for expected API failures."""
+    limiter = limiter if limiter is not None else RateLimiter(0)
+    result = RunResult()
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+
+    try:
+        for turn in range(1, max_iterations + 1):
+            result.turns = turn
+            response = request_completion(
+                client,
+                limiter,
+                model=model,
+                messages=messages,
+                tools=available_functions,
+                temperature=0,
+                max_tokens=max_tokens,
+            )
+
+            if response.model and response.model not in result.models_seen:
+                result.models_seen.append(response.model)
+
+            if response.usage is not None:
+                result.prompt_tokens += response.usage.prompt_tokens
+                result.completion_tokens += response.usage.completion_tokens
+
+                if verbose:
+                    print(f"Prompt tokens: {response.usage.prompt_tokens}")
+                    print(f"Response tokens: {response.usage.completion_tokens}")
+
+            choice = response.choices[0]
+            message = choice.message
+
+            if choice.finish_reason == "content_filter":
+                result.exit_code = 1
+                result.error = (
+                    "Error: the provider blocked this response with a safety "
+                    "filter (finish_reason=content_filter). Rephrase the request."
+                )
+                return result
+
+            if choice.finish_reason == "length":
+                print(
+                    f"Warning: the model stopped at the {max_tokens} token limit; "
+                    "its output may be incomplete."
+                )
+
+            _normalise_tool_call_ids(message, turn)
+            messages.append(message)
+
+            if not message.tool_calls:
+                result.final_message = (
+                    message.content or "(the model returned no content)"
+                )
+                return result
+
+            for tool_call in message.tool_calls:
+                result_message = call_function(
+                    tool_call,
+                    working_directory=str(working_directory),
+                    verbose=verbose,
+                )
+
+                if not result_message.get("content"):
+                    raise RuntimeError("Tool result content cannot be empty")
+
+                result.tool_calls += 1
+
+                if verbose:
+                    print(f"-> {result_message['content']}")
+
+                messages.append(result_message)
+
+        result.exit_code = 1
+        result.error = (
+            "Error: Maximum number of iterations reached without a final response"
+        )
+        return result
+
+    except APIStatusError as exc:
+        result.exit_code = 1
+        result.error = (
+            f"Error: the API rejected the request ({exc.status_code}): {exc.message}"
+        )
+    except APIConnectionError as exc:
+        result.exit_code = 1
+        result.error = f"Error: could not reach the API: {exc}"
+    finally:
+        result.rate_limit_wait = limiter.total_wait
+
+    return result
+
+
+def format_summary(settings: Settings, result: RunResult) -> str:
+    served = ", ".join(result.models_seen) if result.models_seen else settings.model
+    return (
+        f"[model={settings.model} | served={served} | turns={result.turns} "
+        f"| prompt_tokens={result.prompt_tokens} "
+        f"| completion_tokens={result.completion_tokens} "
+        f"| rate_limit_wait={result.rate_limit_wait:.1f}s]"
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     load_dotenv()
     settings = Settings.from_env(args)
     client = create_client(settings)
@@ -131,13 +268,6 @@ def main() -> int:
         print(f'Error: "{settings.working_directory}" is not a directory')
         return 1
 
-    limiter = RateLimiter(settings.min_interval)
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": args.user_prompt},
-    ]
-
     if settings.verbose:
         print(f"Base URL: {settings.base_url}")
         print(f"Model: {settings.model} (key from {settings.api_key_source})")
@@ -145,95 +275,30 @@ def main() -> int:
         print(f"Rate limit: {settings.min_interval:.1f}s between requests")
         print(f"User prompt: {args.user_prompt}")
 
-    prompt_tokens = 0
-    completion_tokens = 0
-    turns = 0
-    models_seen: list[str] = []
+    result = run_agent(
+        client,
+        args.user_prompt,
+        settings.working_directory,
+        model=settings.model,
+        max_iterations=settings.max_iterations,
+        max_tokens=settings.max_tokens,
+        limiter=RateLimiter(settings.min_interval),
+        verbose=settings.verbose,
+    )
 
-    try:
-        for turn in range(1, settings.max_iterations + 1):
-            turns = turn
-            response = request_completion(
-                client,
-                limiter,
-                model=settings.model,
-                messages=messages,
-                tools=available_functions,
-                temperature=0,
-                max_tokens=settings.max_tokens,
-            )
-
-            if response.model and response.model not in models_seen:
-                models_seen.append(response.model)
-
-            if response.usage is not None:
-                prompt_tokens += response.usage.prompt_tokens
-                completion_tokens += response.usage.completion_tokens
-
-                if settings.verbose:
-                    print(f"Prompt tokens: {response.usage.prompt_tokens}")
-                    print(f"Response tokens: {response.usage.completion_tokens}")
-
-            choice = response.choices[0]
-            message = choice.message
-
-            if choice.finish_reason == "content_filter":
-                print(
-                    "Error: the provider blocked this response with a safety "
-                    "filter (finish_reason=content_filter). Rephrase the request."
-                )
-                return 1
-
-            if choice.finish_reason == "length":
-                print(
-                    f"Warning: the model stopped at the {settings.max_tokens} "
-                    "token limit; its output may be incomplete."
-                )
-
-            _normalise_tool_call_ids(message)
-            messages.append(message)
-
-            if not message.tool_calls:
-                print(message.content or "(the model returned no content)")
-                break
-
-            for tool_call in message.tool_calls:
-                result_message = call_function(
-                    tool_call,
-                    working_directory=str(settings.working_directory),
-                    verbose=settings.verbose,
-                )
-
-                if not result_message.get("content"):
-                    raise RuntimeError("Tool result content cannot be empty")
-
-                if settings.verbose:
-                    print(f"-> {result_message['content']}")
-
-                messages.append(result_message)
-        else:
-            print("Error: Maximum number of iterations reached without a final response")
-            return 1
-    except APIStatusError as exc:
-        print(f"Error: the API rejected the request ({exc.status_code}): {exc.message}")
-        if exc.status_code in (401, 403):
+    if result.error:
+        print(result.error)
+        if "401" in result.error or "403" in result.error:
             print(
                 f"Hint: check {settings.api_key_source or 'LLM_API_KEY'} — "
                 f"it was sent to {settings.base_url}"
             )
-        return 1
-    except APIConnectionError as exc:
-        print(f"Error: could not reach the API at {settings.base_url}: {exc}")
-        return 1
+    else:
+        print(result.final_message)
 
-    served = ", ".join(models_seen) if models_seen else settings.model
-    print(
-        f"[model={settings.model} | served={served} | turns={turns} "
-        f"| prompt_tokens={prompt_tokens} | completion_tokens={completion_tokens} "
-        f"| rate_limit_wait={limiter.total_wait:.1f}s]"
-    )
-    return 0
+    print(format_summary(settings, result))
+    return result.exit_code
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

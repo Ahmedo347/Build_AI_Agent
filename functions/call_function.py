@@ -46,7 +46,9 @@ def call_function(
     try:
         function_args = json.loads(tool_call.function.arguments or "{}")
     except json.JSONDecodeError as exc:
-        return tool_message(f"Error: could not parse arguments for {function_name}: {exc}")
+        return tool_message(
+            f"Error: could not parse arguments for {function_name}: {exc}"
+        )
 
     if not isinstance(function_args, dict):
         return tool_message(
@@ -68,6 +70,8 @@ def call_function(
     except TypeError as exc:
         return tool_message(f"Error: bad arguments for {function_name}: {exc}")
     except Exception as exc:  # noqa: BLE001 - a tool must never kill the agent loop
-        return tool_message(f"Error: {function_name} failed: {type(exc).__name__}: {exc}")
+        return tool_message(
+            f"Error: {function_name} failed: {type(exc).__name__}: {exc}"
+        )
 
     return tool_message(str(result) or "(no output)")

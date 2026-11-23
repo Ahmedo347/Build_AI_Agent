@@ -56,9 +56,7 @@ def _truncate(text: str) -> str:
 def run_python_file(
     working_directory: str, file_path: str, args: list[str] | None = None
 ) -> str:
-    target_file, error = resolve_path(
-        working_directory, file_path, action="execute"
-    )
+    target_file, error = resolve_path(working_directory, file_path, action="execute")
     if error:
         return error
 

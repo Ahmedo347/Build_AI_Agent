@@ -12,7 +12,7 @@ def resolve_path(
     """
     try:
         root = Path(working_directory).resolve()
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
         return None, f'Error: Invalid working directory: "{working_directory}"'
 
     try:
