@@ -18,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
 from evals.harness import (
     EvalRun,
     generate_markdown_report,
@@ -89,6 +90,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+
+    load_dotenv()
 
     SCRATCH_ROOT.mkdir(exist_ok=True)
 
