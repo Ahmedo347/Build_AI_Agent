@@ -1,4 +1,4 @@
-# Build AI Agent
+# Safe Code Agent
 
 ![CI](https://github.com/Ahmedo347/Build_AI_Agent/actions/workflows/ci.yml/badge.svg)
 

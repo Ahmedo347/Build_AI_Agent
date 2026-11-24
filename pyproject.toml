@@ -1,5 +1,5 @@
 [project]
-name = "build-ai-agent"
+name = "safe-code-agent"
 version = "0.1.0"
 description = "A tool-calling AI coding agent with a sandboxed working directory"
 readme = "README.md"
