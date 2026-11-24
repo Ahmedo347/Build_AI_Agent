@@ -57,14 +57,15 @@ class RecordingPolicy:
 def test_every_registered_tool_is_classified():
     """Adding a tool to the registry without classifying it must fail loudly."""
 
+    assert len(function_map) == 6
     assert set(function_map) == READ_ONLY_TOOLS | MUTATING_TOOLS
 
 
 def test_read_only_tools_are_never_prompted():
     policy = RecordingPolicy(Decision.deny("should not be asked"))
 
-    for name in ("get_files_info", "get_file_content"):
-        assert authorize(request(name, directory="."), policy).allowed
+    for name in sorted(READ_ONLY_TOOLS):
+        assert authorize(request(name, directory=".", query="x"), policy).allowed
 
     assert policy.calls == []
 

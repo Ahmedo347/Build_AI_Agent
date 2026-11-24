@@ -1,6 +1,6 @@
 # Build AI Agent
 
-A small but defensible coding agent: an LLM in a loop with four sandboxed tools,
+A small but defensible coding agent: an LLM in a loop with six sandboxed tools,
 rooted at a single working directory. Built to understand how tool-calling agents
 actually work — file access, code execution, error recovery — without a framework
 hiding the interesting parts.
@@ -16,7 +16,9 @@ you ──> system prompt + tools ──> LLM ──┬──> final answer
 | --- | --- |
 | `get_files_info` | List a directory: name, size, whether it is a directory |
 | `get_file_content` | Read a file, capped at 10,000 characters |
+| `search_files` | Search file contents by literal or regex, with a glob filter and capped output |
 | `write_file` | Create or overwrite a file (creates parent directories) |
+| `edit_file` | Replace one exact, unique occurrence of text in an existing file |
 | `run_python_file` | Execute a Python file with optional arguments, 30s timeout |
 
 Every path is resolved against the working directory and rejected if it escapes,
@@ -100,8 +102,8 @@ Every tool is classified in code, not by the model:
 
 | Tool | Gate |
 | --- | --- |
-| `get_files_info`, `get_file_content` | auto-allow, never prompt |
-| `write_file`, `run_python_file` | ask `[y/N]`, showing the tool, path and size/args |
+| `get_files_info`, `get_file_content`, `search_files` | auto-allow, never prompt |
+| `write_file`, `edit_file`, `run_python_file` | ask `[y/N]`, showing the tool, path and size/args |
 
 ```
 Allow write_file (path: pkg/calculator.py, 220 chars)? [y/N]
@@ -155,7 +157,8 @@ key explicitly blank.
 | --- | --- |
 | `tests/test_paths.py` | Traversal, absolute paths, **symlink escapes**, the secret deny-list |
 | `tests/test_permissions.py` | Classification, policy precedence, interactive answers, fail-closed defaults |
-| `tests/test_tools.py` | All four tools: truncation, timeouts, exit codes, env scrubbing |
+| `tests/test_tools.py` | Core tools: truncation, timeouts, exit codes, env scrubbing |
+| `tests/test_search_and_edit.py` | Search caps and secret/symlink skipping; edit uniqueness, sandbox and gate |
 | `tests/test_call_function.py` | Bad JSON, unknown tools, tool exceptions — none may raise |
 | `tests/test_agent_loop.py` | Tool round-trips, missing `tool_call_id`, `content_filter`, iteration cap, accounting |
 | `tests/test_retry.py` | 429/5xx retries, `Retry-After`, non-retryable 4xx, limiter placement |
@@ -170,7 +173,7 @@ CI (`.github/workflows/ci.yml`) runs lint, format check and the tests on Python
 - **Tool errors are values, not exceptions.** A failed tool returns `Error: ...`
   as the `tool` message, so the model can read the failure and correct itself.
   `call_function` never raises, which keeps every `tool_call_id` answered.
-- **Containment happens once.** All four tools share `functions/paths.py`, which
+- **Containment happens once.** All tools share `functions/paths.py`, which
   resolves both root and target with `Path.resolve()` before checking
   `is_relative_to`. Resolving first is what defeats symlink escapes.
 - **The sandbox is advisory, not a jail.** Path checks stop path traversal, not a

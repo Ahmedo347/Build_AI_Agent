@@ -2,8 +2,9 @@
 
 The classification is a hard-coded allow-list, not a model decision:
 
-- ``get_files_info`` and ``get_file_content`` never ask.
-- ``write_file`` and ``run_python_file`` always go through the policy.
+- ``get_files_info``, ``get_file_content`` and ``search_files`` never ask.
+- ``write_file``, ``edit_file`` and ``run_python_file`` always go through the
+  policy.
 
 ``run_agent`` receives a policy instead of calling ``input()`` itself, so the
 loop stays testable and the CLI owns all terminal interaction. A missing or
@@ -18,8 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-READ_ONLY_TOOLS = frozenset({"get_files_info", "get_file_content"})
-MUTATING_TOOLS = frozenset({"write_file", "run_python_file"})
+READ_ONLY_TOOLS = frozenset({"get_files_info", "get_file_content", "search_files"})
+MUTATING_TOOLS = frozenset({"write_file", "edit_file", "run_python_file"})
 
 NO_CHANGES = "No changes were made."
 
@@ -61,6 +62,11 @@ class PermissionRequest:
         if isinstance(content, str):
             unit = "char" if len(content) == 1 else "chars"
             details.append(f"{len(content)} {unit}")
+
+        old_text = self.arguments.get("old_text")
+        new_text = self.arguments.get("new_text")
+        if isinstance(old_text, str) and isinstance(new_text, str):
+            details.append(f"{len(old_text)} -> {len(new_text)} chars")
 
         args = self.arguments.get("args")
         if isinstance(args, list):

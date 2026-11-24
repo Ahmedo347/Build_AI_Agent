@@ -5,6 +5,8 @@ When a user asks a question or makes a request, make a function call plan. You c
 
 - List files and directories
 - Read file contents
+- Search file contents across the project (prefer search_files over reading every file)
+- Edit existing files with an exact-text replacement (prefer edit_file over write_file)
 - Execute Python files with optional arguments
 - Write or overwrite files
 
