@@ -19,6 +19,7 @@ dev = [
 # The root test_*.py files are print-based smoke scripts, not pytest modules.
 testpaths = ["tests"]
 addopts = "--strict-markers"
+pythonpath = ["."]
 
 [tool.ruff]
 extend-exclude = ["calculator"]
