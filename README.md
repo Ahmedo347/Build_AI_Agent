@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/Ahmedo347/Build_AI_Agent/actions/workflows/ci.yml/badge.svg)
 
-A small but defensible coding agent: an LLM in a loop with **six** sandboxed tools,
+A small but defensible coding agent: an LLM in a loop with **four** sandboxed tools,
 rooted at a single working directory. Built to understand how tool-calling agents
 actually work — file access, code execution, error recovery — without a framework
 hiding the interesting parts.
@@ -18,9 +18,7 @@ you ──> system prompt + tools ──> LLM ──┬──> final answer
 | --- | --- |
 | `get_files_info` | List a directory: name, size, whether it is a directory |
 | `get_file_content` | Read a file, capped at 10,000 characters |
-| `search_files` | Search file contents by literal or regex, with a glob filter and capped output |
 | `write_file` | Create or overwrite a file (creates parent directories) |
-| `edit_file` | Replace one exact, unique occurrence of text in an existing file |
 | `run_python_file` | Execute a Python file with optional arguments, 30s timeout |
 
 Every path is resolved against the working directory and rejected if it escapes,
@@ -104,12 +102,11 @@ Every tool is classified in code, not by the model:
 
 | Tool | Gate |
 | --- | --- |
-| `get_files_info`, `get_file_content`, `search_files` | auto-allow, never prompt |
-| `write_file`, `edit_file`, `run_python_file` | ask `[y/N]`, showing the tool, path and size/args |
+| `get_files_info`, `get_file_content` | auto-allow, never prompt |
+| `write_file`, `run_python_file` | ask `[y/N]`, showing the tool, path and size/args |
 
 ```
 Allow write_file (path: pkg/calculator.py, 220 chars)? [y/N]
-Allow edit_file (path: pkg/calculator.py, 10 -> 10 chars)? [y/N]
 Allow run_python_file (path: main.py, args: ['3 + 5'])? [y/N]
 ```
 
@@ -157,8 +154,7 @@ $ uv run main.py "now use python -c to overwrite it" --yes
 ```
 
 The gate applies per tool call, not per diff. An approved `write_file` overwrites
-the file atomically; `edit_file` requires the exact existing text and fails
-cleanly if it is absent or ambiguous.
+the file atomically.
 
 `run_agent()` takes the policy as a `policy=` argument and never reads stdin
 itself, so the loop stays headless-testable and the CLI owns all terminal I/O. A
