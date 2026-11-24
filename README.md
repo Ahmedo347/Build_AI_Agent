@@ -1,6 +1,8 @@
 # Build AI Agent
 
-A small but defensible coding agent: an LLM in a loop with four sandboxed tools,
+![CI](https://github.com/Ahmedo347/Build_AI_Agent/actions/workflows/ci.yml/badge.svg)
+
+A small but defensible coding agent: an LLM in a loop with **six** sandboxed tools,
 rooted at a single working directory. Built to understand how tool-calling agents
 actually work — file access, code execution, error recovery — without a framework
 hiding the interesting parts.
@@ -16,7 +18,9 @@ you ──> system prompt + tools ──> LLM ──┬──> final answer
 | --- | --- |
 | `get_files_info` | List a directory: name, size, whether it is a directory |
 | `get_file_content` | Read a file, capped at 10,000 characters |
+| `search_files` | Search file contents by literal or regex, with a glob filter and capped output |
 | `write_file` | Create or overwrite a file (creates parent directories) |
+| `edit_file` | Replace one exact, unique occurrence of text in an existing file |
 | `run_python_file` | Execute a Python file with optional arguments, 30s timeout |
 
 Every path is resolved against the working directory and rejected if it escapes,
@@ -94,17 +98,18 @@ A run ends with a one-line summary:
 `served` is the model the provider actually answered with — worth logging when a
 gateway (FreeLLMAPI, OpenRouter `auto`) may route elsewhere.
 
-## Permissions
+## Security & Permission Gate
 
 Every tool is classified in code, not by the model:
 
 | Tool | Gate |
 | --- | --- |
-| `get_files_info`, `get_file_content` | auto-allow, never prompt |
-| `write_file`, `run_python_file` | ask `[y/N]`, showing the tool, path and size/args |
+| `get_files_info`, `get_file_content`, `search_files` | auto-allow, never prompt |
+| `write_file`, `edit_file`, `run_python_file` | ask `[y/N]`, showing the tool, path and size/args |
 
 ```
 Allow write_file (path: pkg/calculator.py, 220 chars)? [y/N]
+Allow edit_file (path: pkg/calculator.py, 10 -> 10 chars)? [y/N]
 Allow run_python_file (path: main.py, args: ['3 + 5'])? [y/N]
 ```
 
@@ -130,6 +135,31 @@ summary counts them:
  | prompt_tokens=3120 | completion_tokens=214 | denied=1 | rate_limit_wait=12.0s]
 ```
 
+### Real log: the agent tries to bypass `write_file` with `run_python_file -c`
+
+```text
+$ echo "write secret" | uv run main.py "create a file with secret data" --dry-run
+ - Calling function: write_file
+ - Denied: write_file (path: secret.txt, 14 chars)
+   Permission denied for write_file (path: secret.txt, 14 chars): dry-run mode...
+$ echo "write secret" | uv run main.py "create a file with secret data" 2>&1 | head -20
+ - Calling function: write_file
+ - Denied: write_file (path: secret.txt, 14 chars)
+   Permission denied for write_file (path: secret.txt, 14 chars): stdin is not a terminal...
+$ uv run main.py "create secret.txt with secret data" --yes
+ - Calling function: write_file
+Successfully wrote to "secret.txt" (14 chars)
+$ uv run main.py "now use python -c to overwrite it" --yes
+ - Calling function: run_python_file
+   args: ['-c', "open('secret.txt','w').write('hacked\\n')"]
+ - Denied: run_python_file (path: -c, args: ['-c', "open('secret.txt','w').write('hacked\\n')"])
+   Permission denied for run_python_file (path: -c, args: ...): the user declined...
+```
+
+The gate applies per tool call, not per diff. An approved `write_file` overwrites
+the file atomically; `edit_file` requires the exact existing text and fails
+cleanly if it is absent or ambiguous.
+
 `run_agent()` takes the policy as a `policy=` argument and never reads stdin
 itself, so the loop stays headless-testable and the CLI owns all terminal I/O. A
 policy is any callable that takes a `PermissionRequest` and returns
@@ -140,7 +170,7 @@ policy is any callable that takes a `PermissionRequest` and returns
 
 ```bash
 uv sync --dev
-uv run pytest        # 158 tests, ~2s
+uv run pytest        # 190 tests, ~30s
 uv run ruff check .
 uv run ruff format --check .
 ```
@@ -155,12 +185,14 @@ key explicitly blank.
 | --- | --- |
 | `tests/test_paths.py` | Traversal, absolute paths, **symlink escapes**, the secret deny-list |
 | `tests/test_permissions.py` | Classification, policy precedence, interactive answers, fail-closed defaults |
-| `tests/test_tools.py` | All four tools: truncation, timeouts, exit codes, env scrubbing |
+| `tests/test_tools.py` | Core tools: truncation, timeouts, exit codes, env scrubbing |
+| `tests/test_search_and_edit.py` | Search caps & secret/symlink skipping; edit uniqueness, sandbox, gate |
 | `tests/test_call_function.py` | Bad JSON, unknown tools, tool exceptions — none may raise |
 | `tests/test_agent_loop.py` | Tool round-trips, missing `tool_call_id`, `content_filter`, iteration cap, accounting |
 | `tests/test_retry.py` | 429/5xx retries, `Retry-After`, non-retryable 4xx, limiter placement |
 | `tests/test_settings.py` | CLI > env > default precedence, provider-specific keys |
 | `tests/test_ratelimit.py` | Interval spacing with an injected clock |
+| `tests/test_eval_harness.py` | Checkpointing, drift detection, isolated fixtures, verification |
 
 CI (`.github/workflows/ci.yml`) runs lint, format check and the tests on Python
 3.13 for every push to `main` and every pull request.
@@ -170,7 +202,7 @@ CI (`.github/workflows/ci.yml`) runs lint, format check and the tests on Python
 - **Tool errors are values, not exceptions.** A failed tool returns `Error: ...`
   as the `tool` message, so the model can read the failure and correct itself.
   `call_function` never raises, which keeps every `tool_call_id` answered.
-- **Containment happens once.** All four tools share `functions/paths.py`, which
+- **Containment happens once.** All tools share `functions/paths.py`, which
   resolves both root and target with `Path.resolve()` before checking
   `is_relative_to`. Resolving first is what defeats symlink escapes.
 - **The sandbox is advisory, not a jail.** Path checks stop path traversal, not a
@@ -188,7 +220,62 @@ CI (`.github/workflows/ci.yml`) runs lint, format check and the tests on Python
 - **Safety-filtered responses are detected** (`finish_reason == "content_filter"`)
   and reported, rather than surfacing an empty message.
 
-## Layout
+## Evaluation & Experiment Log (`baseline → v2`)
+
+An automated eval harness runs the agent on 16 tasks (6 read, 3 fix, 7 feature)
+against a fresh copy of the `calculator/` fixture. Each run uses an in-process
+`run_agent()` with `ALLOW_ALL` policy, a shared `RateLimiter`, and model pinning
+(`gemini-3.5-flash-lite`). Checkpoints and Markdown/JSON reports are emitted.
+
+### Baseline (4 tools) vs v2 (6 tools: +`search_files`, +`edit_file`)
+
+| Metric | Baseline | v2 | Δ | Δ% |
+| --- | ---: | ---: | ---: | ---: |
+| Pass rate | **100%** (16/16) | **87.5%** (14/16) | −12.5 pp | — |
+| Avg turns | 9.44 | 9.31 | −0.13 | −1.4% |
+| Prompt tokens | 325,894 | 366,868 | +40,974 | **+12.6%** |
+| Completion tokens | 17,361 | 10,197 | −7,164 | **−41.3%** |
+| Total tokens | 343,255 | 377,065 | +33,810 | **+9.8%** |
+| Total latency | 738.8 s | 871.1 s | +132.3 s | +17.9% |
+| Drift tasks | 0 | 0 | 0 | — |
+
+### Tool usage
+
+| Tool | Baseline | v2 | Δ |
+| --- | ---: | ---: | ---: |
+| `get_files_info` | 26 | 19 | −7 |
+| `get_file_content` | 54 | 49 | −5 |
+| `search_files` | 0 | 12 | +12 |
+| `write_file` | 24 | 0 | **−24** |
+| `edit_file` | 0 | 25 | +25 |
+| `run_python_file` | 31 | 29 | −2 |
+| **Total calls** | **135** | **134** | −1 |
+
+### Why v2 was not merged
+
+1. **Schema tax**: adding two tools inserted two new function schemas into every
+   prompt. On this small repo (~2 KB source) the marginal cost was ~304 extra
+   prompt tokens/turn (prompt tokens rose 12.6%).
+2. **Completion savings didn't pay for it**: `edit_file` cut completion tokens
+   41.3% (no full-file rewrites), but prompt tokens dominate (~95% of total).
+3. **No turn reduction**: total calls stayed flat (135 → 134). The agent swapped
+   `write_file` for `edit_file` and `get_file_content` for `search_files` but
+   did not need fewer steps.
+4. **One hard failure**: `feature-04` (add `sqrt`) hit `max_iterations=20` in a
+   read/edit loop that did not converge.
+5. **Brittle read check**: `read-01` failed because the answer lacked the exact
+   word "arithmetic" — the `expected_substrings` matcher is too strict.
+
+### Scope / Caveat
+
+> The 16 tasks verify with the **original** `calculator/tests.py`, which passes
+> on a clean copy. Therefore "pass" means *non-regression* (the agent didn't
+> break existing behaviour), not *correctness* (the feature was actually
+> implemented). A future correctness-sensitive benchmark would need per-task
+> regression tests that fail on the pristine fixture.
+
+The branch `feat/search-and-edit-tools` is frozen at commit `7918c1a` and
+intentionally not merged into `main`.
 
 ```
 main.py                     CLI, agent loop (run_agent), retries, accounting

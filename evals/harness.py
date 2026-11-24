@@ -56,11 +56,13 @@ class TaskResult:
     prompt_tokens: int
     completion_tokens: int
     latency_s: float
-    drift: bool
-    notes: str
+    rate_limit_wait: float = 0.0
+    drift: bool = False
+    notes: str = ""
     final_message: str | None = None
     error: str | None = None
     models_seen: list[str] = field(default_factory=list)
+    tool_counts: dict[str, int] = field(default_factory=dict)
 
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
@@ -100,6 +102,12 @@ class EvalRun:
             return 0.0
         return sum(r.turns for r in self.results) / self.tasks_total
 
+    @property
+    def error_rate(self) -> float:
+        if self.tasks_total == 0:
+            return 0.0
+        return ((self.tasks_failed + self.tasks_error) / self.tasks_total) * 100
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "requested_model": self.requested_model,
@@ -111,6 +119,7 @@ class EvalRun:
             "tasks_skipped": self.tasks_skipped,
             "pass_rate": round(self.pass_rate, 2),
             "avg_turns": round(self.avg_turns, 2),
+            "error_rate": round(self.error_rate, 2),
             "total_prompt_tokens": self.total_prompt_tokens,
             "total_completion_tokens": self.total_completion_tokens,
             "total_tokens": self.total_prompt_tokens + self.total_completion_tokens,
@@ -205,8 +214,10 @@ def run_single_task(
             prompt_tokens=0,
             completion_tokens=0,
             latency_s=0.0,
+            rate_limit_wait=0.0,
             drift=False,
             notes="dry-run mode",
+            tool_counts={},
         )
 
     with tempfile.TemporaryDirectory(
@@ -240,10 +251,12 @@ def run_single_task(
                 prompt_tokens=result.prompt_tokens,
                 completion_tokens=result.completion_tokens,
                 latency_s=latency,
+                rate_limit_wait=result.rate_limit_wait,
                 drift=drift,
                 notes=result.error,
                 error=result.error,
                 models_seen=result.models_seen,
+                tool_counts=result.tool_counts,
             )
 
         verify_passed, verify_notes = verify_task(task, work_dir)
@@ -267,10 +280,12 @@ def run_single_task(
             prompt_tokens=result.prompt_tokens,
             completion_tokens=result.completion_tokens,
             latency_s=latency,
+            rate_limit_wait=result.rate_limit_wait,
             drift=drift,
             notes=notes,
             final_message=result.final_message,
             models_seen=result.models_seen,
+            tool_counts=result.tool_counts,
         )
 
 

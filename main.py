@@ -47,6 +47,7 @@ class RunResult:
     rate_limit_wait: float = 0.0
     final_message: str | None = None
     error: str | None = None
+    tool_counts: dict[str, int] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -279,6 +280,9 @@ def run_agent(
                     raise RuntimeError("Tool result content cannot be empty")
 
                 result.tool_calls += 1
+                result.tool_counts[tool_call.function.name] = (
+                    result.tool_counts.get(tool_call.function.name, 0) + 1
+                )
 
                 if verbose:
                     print(f"-> {result_message['content']}")

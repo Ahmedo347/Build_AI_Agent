@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 from evals.harness import (
     EvalRun,
     generate_markdown_report,
@@ -193,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         run.total_prompt_tokens += result.prompt_tokens
         run.total_completion_tokens += result.completion_tokens
         run.total_latency_s += elapsed
-        run.total_rate_limit_wait += result.latency_s
+        run.total_rate_limit_wait += result.rate_limit_wait
         run.actual_models.extend(result.models_seen)
 
         save_checkpoint(results_path, run)

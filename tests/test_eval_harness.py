@@ -95,8 +95,10 @@ def test_task_result_total_tokens():
         prompt_tokens=100,
         completion_tokens=50,
         latency_s=1.0,
+        rate_limit_wait=0.0,
         drift=False,
         notes="",
+        tool_counts={},
     )
     assert r.total_tokens() == 150
 
@@ -112,9 +114,9 @@ def test_eval_run_pass_rate():
 def test_eval_run_avg_turns():
     run = EvalRun(requested_model="m")
     run.results = [
-        TaskResult("t1", "r", "pass", 2, 10, 5, 1.0, False, ""),
-        TaskResult("t2", "r", "pass", 4, 10, 5, 1.0, False, ""),
-        TaskResult("t3", "r", "pass", 3, 10, 5, 1.0, False, ""),
+        TaskResult("t1", "r", "pass", 2, 10, 5, 1.0, 0.0, False, "", tool_counts={}),
+        TaskResult("t2", "r", "pass", 4, 10, 5, 1.0, 0.0, False, "", tool_counts={}),
+        TaskResult("t3", "r", "pass", 3, 10, 5, 1.0, 0.0, False, "", tool_counts={}),
     ]
     run.tasks_total = 3
     assert run.avg_turns == 3.0
@@ -168,8 +170,12 @@ def test_verify_task_no_verification_needed():
 def test_save_and_load_checkpoint():
     run = EvalRun(requested_model="test/model")
     run.results = [
-        TaskResult("t1", "read", "pass", 1, 10, 5, 0.5, False, "ok"),
-        TaskResult("t2", "fix", "fail", 2, 20, 10, 1.0, True, "bad"),
+        TaskResult(
+            "t1", "read", "pass", 1, 10, 5, 0.5, 0.0, False, "ok", tool_counts={}
+        ),
+        TaskResult(
+            "t2", "fix", "fail", 2, 20, 10, 1.0, 0.0, True, "bad", tool_counts={}
+        ),
     ]
 
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
@@ -202,10 +208,32 @@ def test_generate_markdown_report():
     run.total_rate_limit_wait = 2.0
     run.results = [
         TaskResult(
-            "read-01", "read", "pass", 2, 50, 25, 2.0, False, "all good", "message"
+            "read-01",
+            "read",
+            "pass",
+            2,
+            50,
+            25,
+            2.0,
+            0.0,
+            False,
+            "all good",
+            "message",
+            tool_counts={},
         ),
         TaskResult(
-            "fix-01", "fix", "fail", 3, 50, 25, 3.0, True, "verify failed", "msg"
+            "fix-01",
+            "fix",
+            "fail",
+            3,
+            50,
+            25,
+            3.0,
+            0.0,
+            True,
+            "verify failed",
+            "msg",
+            tool_counts={},
         ),
     ]
 
@@ -553,7 +581,9 @@ def test_eval_run_to_dict():
     run.tasks_total = 1
     run.tasks_passed = 1
     run.actual_models = ["test/model"]
-    run.results = [TaskResult("t1", "r", "pass", 1, 10, 5, 1.0, False, "")]
+    run.results = [
+        TaskResult("t1", "r", "pass", 1, 10, 5, 1.0, 0.0, False, "", tool_counts={})
+    ]
 
     d = run.to_dict()
     assert d["requested_model"] == "test/model"
@@ -643,7 +673,11 @@ def test_results_json_structure(tmp_path):
     run.total_completion_tokens = 50
     run.total_latency_s = 2.0
     run.total_rate_limit_wait = 0.5
-    run.results = [TaskResult("read-01", "read", "pass", 2, 100, 50, 2.0, False, "ok")]
+    run.results = [
+        TaskResult(
+            "read-01", "read", "pass", 2, 100, 50, 2.0, 0.0, False, "ok", tool_counts={}
+        )
+    ]
 
     path = tmp_path / "results.json"
     save_checkpoint(path, run)
@@ -652,6 +686,9 @@ def test_results_json_structure(tmp_path):
     assert "requested_model" in data
     assert "actual_models" in data
     assert "pass_rate" in data
+    assert "error_rate" in data
     assert "results" in data
     assert data["results"][0]["task_id"] == "read-01"
     assert "drift" in data["results"][0]
+    assert "tool_counts" in data["results"][0]
+    assert "rate_limit_wait" in data["results"][0]
