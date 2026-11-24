@@ -41,56 +41,56 @@
       "category": "fix",
       "prompt": "The calculator crashes on division by zero instead of raising a clear ValueError. Fix pkg/calculator.py so that division by zero raises ValueError('division by zero') with a clear message.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     },
     {
       "id": "fix-02",
       "category": "fix",
       "prompt": "The calculator doesn't support parentheses for grouping. Add support for parentheses so that expressions like '(3 + 5) * 2' evaluate correctly.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     },
     {
       "id": "fix-03",
       "category": "fix",
       "prompt": "The calculator's evaluate() method returns None for empty strings, but the main.py CLI treats None as an error. Make evaluate() raise ValueError('empty expression') instead of returning None for empty/whitespace input, and update main.py to catch this.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     },
     {
       "id": "feature-01",
       "category": "feature",
       "prompt": "Add a modulo operator (%) to the calculator with precedence 2 (same as * and /). Add a test for it in tests.py.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     },
     {
       "id": "feature-02",
       "category": "feature",
       "prompt": "Add a power operator (^) to the calculator with precedence 3 (higher than * and /). Add a test for it in tests.py.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     },
     {
       "id": "feature-03",
       "category": "feature",
       "prompt": "Add a new method `evaluate_all(expressions: list[str]) -> list[float | None]` to the Calculator class that evaluates multiple expressions at once and returns a list of results. Add a test for it.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     },
     {
       "id": "feature-04",
       "category": "feature",
       "prompt": "Add support for a 'sqrt' function that computes the square root of a number, e.g., 'sqrt 16' should return 4. Add a test for it.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     },
     {
       "id": "feature-05",
       "category": "feature",
       "prompt": "Add a test case for the existing division by zero behavior. The test should expect a ValueError to be raised when evaluating '5 / 0'.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     },
     {
       "id": "read-06",
@@ -104,14 +104,14 @@
       "category": "feature",
       "prompt": "Add a 'max' function that takes two numbers and returns the larger, e.g., 'max 3 7' returns 7. Add a test for it.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     },
     {
       "id": "feature-07",
       "category": "feature",
       "prompt": "Add support for a 'min' function similar to max. Add a test for it.",
       "expected_substrings": null,
-      "verify_cmd": "python -m pytest tests.py -v"
+      "verify_cmd": "/home/ahmed/workspace/Build_AI_Agent/.venv/bin/python -m pytest tests.py -v"
     }
   ]
 }
